@@ -8,6 +8,10 @@ constexpr int windowWidth{800}, windowHeight{600};
 constexpr float ballRadius{10.0f}, ballVelocity{8.0f};
 constexpr float paddleWidth{60.0f}, paddleHeight{20.0f}, paddleVelocity{6.0f};
 
+// Bricks
+constexpr float blockWidth{60.f}, blockHeight{20.f};
+constexpr int countBlockX{11}, countBlockY{4};
+
 struct Ball
 {
     // SFML class that defines a circle shape
@@ -91,9 +95,32 @@ struct Paddle
     float bottom() { return y() + shape.getSize().y / 2.f; }
 };
 
+struct Brick
+{
+    RectangleShape shape;
+
+    // With this check if is destroyed or not.
+    bool destroyed{false};
+
+    Brick(float mX, float mY)
+    {
+        shape.setPosition(mX, mY);
+        shape.setSize({blockWidth, blockHeight});
+        shape.setFillColor(Color::Yellow);
+        shape.setOrigin(blockWidth / 2.f, blockHeight / 2.f);
+    }
+
+    float x() { return shape.getPosition().x; }
+    float y() { return shape.getPosition().y; }
+    float left() { return x() - shape.getSize().x / 2.f; }
+    float right() { return x() + shape.getSize().x / 2.f; }
+    float top() { return y() - shape.getSize().y / 2.f; }
+    float bottom() { return y() + shape.getSize().y / 2.f; }
+};
+
 // Using to check the colliding of two shapes.
 template <class T1, class T2>
-bool isIntersecting(T1& mA, T2& mB)
+bool isIntersecting(T1 &mA, T2 &mB)
 {
     return mA.right() >= mB.left() && mA.left() <= mB.right() && mA.bottom() >= mB.top() && mA.top() <= mB.bottom();
 }
@@ -102,14 +129,17 @@ bool isIntersecting(T1& mA, T2& mB)
 void testCollision(Paddle &mPaddle, Ball &mBall)
 {
     // If not collision, return.
-    if(!isIntersecting(mPaddle, mBall)) return;
+    if (!isIntersecting(mPaddle, mBall))
+        return;
 
     // Otherwise change velocity (push ball to upwards).
     mBall.velocity.y = -ballVelocity;
 
     // and dependes of the paddle position.
-    if(mBall.x() < mPaddle.x()) mBall.velocity.x = -ballVelocity;    
-    else  mBall.velocity.x = ballVelocity;  
+    if (mBall.x() < mPaddle.x())
+        mBall.velocity.x = -ballVelocity;
+    else
+        mBall.velocity.x = ballVelocity;
 }
 
 int main()
@@ -117,6 +147,16 @@ int main()
     // Ball instance
     Ball ball{windowWidth / 2, windowHeight / 2};
     Paddle paddle{windowWidth / 2, windowHeight - 50};
+
+    vector<Brick> bricks;
+
+    for (int iX{0}; iX < countBlockX; ++iX)
+    {
+        for (int iY{0}; iY < countBlockY; ++iY)
+        {
+            bricks.emplace_back((iX + 1) * (blockWidth + 3) + 22, (iY + 2) * (blockHeight + 3));
+        }
+    }
 
     RenderWindow window{{windowWidth, windowHeight}, "Simple Arkanoid"};
     window.setFramerateLimit(60);
@@ -153,6 +193,10 @@ int main()
         // Drawing All.
         window.draw(ball.shape);
         window.draw(paddle.shape);
+
+        // Draw Bricks
+        for (auto &brick : bricks)
+            window.draw(brick.shape);
 
         // Displaying the window.
         window.display();
