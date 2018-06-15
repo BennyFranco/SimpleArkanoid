@@ -91,6 +91,27 @@ struct Paddle
     float bottom() { return y() + shape.getSize().y / 2.f; }
 };
 
+// Using to check the colliding of two shapes.
+template <class T1, class T2>
+bool isIntersecting(T1& mA, T2& mB)
+{
+    return mA.right() >= mB.left() && mA.left() <= mB.right() && mA.bottom() >= mB.top() && mA.top() <= mB.bottom();
+}
+
+// Testing the paddle and ball collision
+void testCollision(Paddle &mPaddle, Ball &mBall)
+{
+    // If not collision, return.
+    if(!isIntersecting(mPaddle, mBall)) return;
+
+    // Otherwise change velocity (push ball to upwards).
+    mBall.velocity.y = -ballVelocity;
+
+    // and dependes of the paddle position.
+    if(mBall.x() < mPaddle.x()) mBall.velocity.x = -ballVelocity;    
+    else  mBall.velocity.x = ballVelocity;  
+}
+
 int main()
 {
     // Ball instance
@@ -127,10 +148,12 @@ int main()
         // Update the paddle.
         paddle.Update();
 
+        testCollision(paddle, ball);
+
         // Drawing All.
         window.draw(ball.shape);
         window.draw(paddle.shape);
-        
+
         // Displaying the window.
         window.display();
     }
