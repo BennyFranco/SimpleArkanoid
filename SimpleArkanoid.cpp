@@ -1,12 +1,13 @@
 #include <SFML/Window.hpp>
 #include <SFML/Graphics.hpp>
+#include <math.h>
 
 using namespace std;
 using namespace sf;
 
 constexpr int windowWidth{800}, windowHeight{600};
 constexpr float ballRadius{10.0f}, ballVelocity{8.0f};
-constexpr float paddleWidth{60.0f}, paddleHeight{20.0f}, paddleVelocity{6.0f};
+constexpr float paddleWidth{60.0f}, paddleHeight{20.0f}, paddleVelocity{10.0f};
 
 // Bricks
 constexpr float blockWidth{60.f}, blockHeight{20.f};
@@ -142,6 +143,34 @@ void testCollision(Paddle &mPaddle, Ball &mBall)
         mBall.velocity.x = ballVelocity;
 }
 
+// Overriding testCollision method for bricks and ball
+void testCollision(Brick &mBrick, Ball &mBall)
+{
+    // If not collision, return.
+    if (!isIntersecting(mBrick, mBall))
+        return;
+
+    // Otherwise destroy the brick!
+    mBrick.destroyed = true;
+
+    // Calculate intersections
+    float overlapLeft{mBall.right() - mBrick.left()};
+    float overlapRight{mBrick.right() - mBall.left()};
+    float overlapTop{mBall.bottom() - mBrick.top()};
+    float overlapBottom{mBrick.bottom() - mBall.top()};
+
+    bool ballFromLeft(abs(overlapLeft) < abs(overlapRight));
+    bool ballFromTop(abs(overlapTop) < abs(overlapBottom));
+
+    float minOverlapX{ballFromLeft ? overlapLeft : overlapRight};
+    float minOverlapY{ballFromTop ? overlapTop : overlapBottom};
+
+    if (abs(minOverlapX) < abs(minOverlapY))
+        mBall.velocity.x = ballFromLeft ? -ballVelocity : ballVelocity;
+    else
+        mBall.velocity.y = ballFromTop ? -ballFromTop : ballVelocity;
+}
+
 int main()
 {
     // Ball instance
@@ -189,6 +218,13 @@ int main()
         paddle.Update();
 
         testCollision(paddle, ball);
+
+        for (auto &brick : bricks)
+            testCollision(brick, ball);
+
+        bricks.erase(remove_if(begin(bricks), end(bricks),
+                               [](const Brick &mBrick) { return mBrick.destroyed; }),
+                     end(bricks));
 
         // Drawing All.
         window.draw(ball.shape);
