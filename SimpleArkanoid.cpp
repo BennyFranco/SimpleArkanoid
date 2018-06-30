@@ -1,13 +1,17 @@
+#include <math.h>
+#include <chrono>
+
 #include <SFML/Window.hpp>
 #include <SFML/Graphics.hpp>
-#include <math.h>
 
 using namespace std;
 using namespace sf;
 
+using FrameTime = float;
+
 constexpr int windowWidth{800}, windowHeight{600};
-constexpr float ballRadius{10.0f}, ballVelocity{8.0f};
-constexpr float paddleWidth{60.0f}, paddleHeight{20.0f}, paddleVelocity{10.0f};
+constexpr float ballRadius{10.0f}, ballVelocity{0.5f};
+constexpr float paddleWidth{60.0f}, paddleHeight{20.0f}, paddleVelocity{0.6f};
 
 // Bricks
 constexpr float blockWidth{60.f}, blockHeight{20.f};
@@ -32,9 +36,9 @@ struct Ball
     }
 
     // Updates the Ball position by velocity.
-    void Update()
+    void Update(FrameTime pFrameTime)
     {
-        shape.move(velocity);
+        shape.move(velocity * pFrameTime);
 
         // Control de limits of the ball in the screen
         if (left() < 0)
@@ -49,17 +53,28 @@ struct Ball
             velocity.y = -ballVelocity;
     }
 
-    float x() { return shape.getPosition().x; }
-    float y() { return shape.getPosition().y; }
-    float left() { return x() - shape.getRadius(); }
-    float right() { return x() + shape.getRadius(); }
-    float top() { return y() - shape.getRadius(); }
-    float bottom() { return y() + shape.getRadius(); }
+    float x()       const noexcept { return shape.getPosition().x; }
+    float y()       const noexcept { return shape.getPosition().y; }
+    float left()    const noexcept { return x() - shape.getRadius(); }
+    float right()   const noexcept { return x() + shape.getRadius(); }
+    float top()     const noexcept { return y() - shape.getRadius(); }
+    float bottom()  const noexcept { return y() + shape.getRadius(); }
 };
 
-struct Paddle
+struct Rectangle
 {
     RectangleShape shape;
+
+    float x()       const noexcept { return shape.getPosition().x; }
+    float y()       const noexcept { return shape.getPosition().y; }
+    float left()    const noexcept { return x() - shape.getSize().x / 2.f; }
+    float right()   const noexcept { return x() + shape.getSize().x / 2.f; }
+    float top()     const noexcept { return y() - shape.getSize().y / 2.f; }
+    float bottom()  const noexcept { return y() + shape.getSize().y / 2.f; }
+};
+
+struct Paddle : public Rectangle
+{
     Vector2f velocity;
 
     Paddle(float mX, float mY)
@@ -70,9 +85,9 @@ struct Paddle
         shape.setOrigin(paddleWidth / 2.f, paddleHeight / 2.f);
     }
 
-    void Update()
+    void Update(FrameTime pFrameTime)
     {
-        shape.move(velocity);
+        shape.move(velocity * pFrameTime);
 
         if (Keyboard::isKeyPressed(Keyboard::Key::Left) && left() > 0)
         {
@@ -87,19 +102,10 @@ struct Paddle
             velocity.x = 0;
         }
     }
-
-    float x() { return shape.getPosition().x; }
-    float y() { return shape.getPosition().y; }
-    float left() { return x() - shape.getSize().x / 2.f; }
-    float right() { return x() + shape.getSize().x / 2.f; }
-    float top() { return y() - shape.getSize().y / 2.f; }
-    float bottom() { return y() + shape.getSize().y / 2.f; }
 };
 
-struct Brick
+struct Brick : public Rectangle
 {
-    RectangleShape shape;
-
     // With this check if is destroyed or not.
     bool destroyed{false};
 
@@ -110,13 +116,6 @@ struct Brick
         shape.setFillColor(Color::Yellow);
         shape.setOrigin(blockWidth / 2.f, blockHeight / 2.f);
     }
-
-    float x() { return shape.getPosition().x; }
-    float y() { return shape.getPosition().y; }
-    float left() { return x() - shape.getSize().x / 2.f; }
-    float right() { return x() + shape.getSize().x / 2.f; }
-    float top() { return y() - shape.getSize().y / 2.f; }
-    float bottom() { return y() + shape.getSize().y / 2.f; }
 };
 
 // Using to check the colliding of two shapes.
@@ -188,10 +187,15 @@ int main()
     }
 
     RenderWindow window{{windowWidth, windowHeight}, "Simple Arkanoid"};
+
+    FrameTime lastFrametime{0.f};
     window.setFramerateLimit(60);
 
     while (window.isOpen())
     {
+        // Start of time interval
+        auto timePoint1(chrono::high_resolution_clock::now());
+
         // check all the window's events that were triggered since the last iteration of the loop
         sf::Event event;
         while (window.pollEvent(event))
@@ -212,10 +216,10 @@ int main()
         window.clear(Color::Black);
 
         // Update the ball position every loop.
-        ball.Update();
+        ball.Update(lastFrametime);
 
         // Update the paddle.
-        paddle.Update();
+        paddle.Update(lastFrametime);
 
         testCollision(paddle, ball);
 
@@ -236,6 +240,27 @@ int main()
 
         // Displaying the window.
         window.display();
+
+        // End of interval
+        auto timePoint2(chrono::high_resolution_clock::now());
+        
+        // Calculate the elapsed time in milliseconds
+        // substract two std::chrono::time_point objects
+        // return a std::chrono::duration object, wich
+        // represent a period.
+        auto elapsedTime(timePoint2 - timePoint1);
+        
+        // Convert a duration to float using
+        // the safe cast function chrono::duration_cast
+        FrameTime ft{chrono::duration_cast<chrono::duration<float, milli>>(elapsedTime).count()};
+
+        lastFrametime = ft;
+        // We can approximate the fps by dividing 1.f by the elapsed seconds
+        // calculated by convert ft to seconds.
+        auto ftSeconds(ft/1000.f);
+        auto fps(1.f/ftSeconds);
+
+        window.setTitle("FT: " + to_string(ft) + "\t FPS: " + to_string(fps));
     }
 
     return 0;
