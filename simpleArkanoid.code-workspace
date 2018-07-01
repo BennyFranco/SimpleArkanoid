@@ -22,7 +22,11 @@
 			"vector": "cpp",
 			"chrono": "cpp",
 			"ratio": "cpp",
-			"__locale": "cpp"
+			"__locale": "cpp",
+			"__bit_reference": "cpp",
+			"initializer_list": "cpp",
+			"iterator": "cpp",
+			"string_view": "cpp"
 		}
 	}
 }

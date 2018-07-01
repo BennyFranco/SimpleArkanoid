@@ -17,6 +17,9 @@ constexpr float paddleWidth{60.0f}, paddleHeight{20.0f}, paddleVelocity{0.6f};
 constexpr float blockWidth{60.f}, blockHeight{20.f};
 constexpr int countBlockX{11}, countBlockY{4};
 
+// Frametime calculations
+constexpr float ftStep{1.f}, ftSlice{1.f};
+
 struct Ball
 {
     // SFML class that defines a circle shape
@@ -53,24 +56,24 @@ struct Ball
             velocity.y = -ballVelocity;
     }
 
-    float x()       const noexcept { return shape.getPosition().x; }
-    float y()       const noexcept { return shape.getPosition().y; }
-    float left()    const noexcept { return x() - shape.getRadius(); }
-    float right()   const noexcept { return x() + shape.getRadius(); }
-    float top()     const noexcept { return y() - shape.getRadius(); }
-    float bottom()  const noexcept { return y() + shape.getRadius(); }
+    float x() const noexcept { return shape.getPosition().x; }
+    float y() const noexcept { return shape.getPosition().y; }
+    float left() const noexcept { return x() - shape.getRadius(); }
+    float right() const noexcept { return x() + shape.getRadius(); }
+    float top() const noexcept { return y() - shape.getRadius(); }
+    float bottom() const noexcept { return y() + shape.getRadius(); }
 };
 
 struct Rectangle
 {
     RectangleShape shape;
 
-    float x()       const noexcept { return shape.getPosition().x; }
-    float y()       const noexcept { return shape.getPosition().y; }
-    float left()    const noexcept { return x() - shape.getSize().x / 2.f; }
-    float right()   const noexcept { return x() + shape.getSize().x / 2.f; }
-    float top()     const noexcept { return y() - shape.getSize().y / 2.f; }
-    float bottom()  const noexcept { return y() + shape.getSize().y / 2.f; }
+    float x() const noexcept { return shape.getPosition().x; }
+    float y() const noexcept { return shape.getPosition().y; }
+    float left() const noexcept { return x() - shape.getSize().x / 2.f; }
+    float right() const noexcept { return x() + shape.getSize().x / 2.f; }
+    float top() const noexcept { return y() - shape.getSize().y / 2.f; }
+    float bottom() const noexcept { return y() + shape.getSize().y / 2.f; }
 };
 
 struct Paddle : public Rectangle
@@ -113,7 +116,7 @@ struct Brick : public Rectangle
     {
         shape.setPosition(mX, mY);
         shape.setSize({blockWidth, blockHeight});
-        shape.setFillColor(Color::Yellow);
+        shape.setFillColor(Color::Green);
         shape.setOrigin(blockWidth / 2.f, blockHeight / 2.f);
     }
 };
@@ -170,65 +173,122 @@ void testCollision(Brick &mBrick, Ball &mBall)
         mBall.velocity.y = ballFromTop ? -ballFromTop : ballVelocity;
 }
 
-int main()
+struct Game
 {
-    // Ball instance
+    RenderWindow window{{windowWidth, windowHeight}, "Simple Arkanoid"};
+    // Accumulate the current frametime slice.
+    // If the game run fast, it will take some frames before
+    // currentSlice >= ftSlice.
+    // else if the game run slow, it will take a single frame for
+    // currentSlice >= ftSlice * n, where n >= 1.
+    FrameTime lastFrametime{0.f}, currentSlice{0.f};
+    bool running{false};
+
     Ball ball{windowWidth / 2, windowHeight / 2};
     Paddle paddle{windowWidth / 2, windowHeight - 50};
-
     vector<Brick> bricks;
 
-    for (int iX{0}; iX < countBlockX; ++iX)
+    Game()
     {
-        for (int iY{0}; iY < countBlockY; ++iY)
+        window.setFramerateLimit(60);
+        for (int iX{0}; iX < countBlockX; ++iX)
         {
-            bricks.emplace_back((iX + 1) * (blockWidth + 3) + 22, (iY + 2) * (blockHeight + 3));
+            for (int iY{0}; iY < countBlockY; ++iY)
+            {
+                bricks.emplace_back((iX + 1) * (blockWidth + 3) + 22, (iY + 2) * (blockHeight + 3));
+            }
         }
     }
 
-    RenderWindow window{{windowWidth, windowHeight}, "Simple Arkanoid"};
-
-    FrameTime lastFrametime{0.f};
-    window.setFramerateLimit(60);
-
-    while (window.isOpen())
+    void run()
     {
-        // Start of time interval
-        auto timePoint1(chrono::high_resolution_clock::now());
+        running = true;
 
+        while (running)
+        {
+            // Start of time interval
+            auto timePoint1(chrono::high_resolution_clock::now());
+            
+            inputPhase();
+            updatePhase();
+            drawPhase();
+
+            // End of interval
+            auto timePoint2(chrono::high_resolution_clock::now());
+
+            // Calculate the elapsed time in milliseconds
+            // substract two std::chrono::time_point objects
+            // return a std::chrono::duration object, wich
+            // represent a period.
+            auto elapsedTime(timePoint2 - timePoint1);
+
+            // Convert a duration to float using
+            // the safe cast function chrono::duration_cast
+            FrameTime ft{chrono::duration_cast<chrono::duration<float, milli>>(elapsedTime).count()};
+
+            lastFrametime = ft;
+            // We can approximate the fps by dividing 1.f by the elapsed seconds
+            // calculated by convert ft to seconds.
+            auto ftSeconds(ft / 1000.f);
+            auto fps(1.f / ftSeconds);
+
+            window.setTitle("FT: " + to_string(ft) + "\t FPS: " + to_string(fps));
+        }
+    }
+
+    void inputPhase()
+    {
         // check all the window's events that were triggered since the last iteration of the loop
         sf::Event event;
         while (window.pollEvent(event))
         {
-            if (event.type == Event::KeyPressed)
-            {
-                if (event.key.code == Keyboard::Escape)
-                {
-                    window.close();
-                }
-            }
             // "close requested" event: we close the window
             if (event.type == sf::Event::Closed)
+            {
+                running = false;
                 window.close();
+                break;
+            }
         }
 
+        if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Escape))
+        {
+            running = false;
+        }
+        
+    }
+
+    void updatePhase()
+    {
+        // Start accumulate frametime
+        currentSlice += lastFrametime;
+
+        // If currentSilice is grather or equal to ftSlice we update our game logic
+        // and decrease currentSlice until currentSlice becomes less than ftSlice.
+        // Ex. if currentSlice is three times as big as ftSlice, we update or
+        // game logic three times.
+        for (; currentSlice >= ftSlice; currentSlice -= ftSlice)
+        {
+            // Update the ball position every loop.
+            ball.Update(ftStep);
+            // Update the paddle.
+            paddle.Update(ftStep);
+
+            testCollision(paddle, ball);
+
+            for (auto &brick : bricks)
+                testCollision(brick, ball);
+
+            bricks.erase(remove_if(begin(bricks), end(bricks),
+                                   [](const Brick &mBrick) { return mBrick.destroyed; }),
+                         end(bricks));
+        }
+    }
+
+    void drawPhase()
+    {
         // Clear window, for some reason I need to do this after events in MacOS.
         window.clear(Color::Black);
-
-        // Update the ball position every loop.
-        ball.Update(lastFrametime);
-
-        // Update the paddle.
-        paddle.Update(lastFrametime);
-
-        testCollision(paddle, ball);
-
-        for (auto &brick : bricks)
-            testCollision(brick, ball);
-
-        bricks.erase(remove_if(begin(bricks), end(bricks),
-                               [](const Brick &mBrick) { return mBrick.destroyed; }),
-                     end(bricks));
 
         // Drawing All.
         window.draw(ball.shape);
@@ -240,28 +300,11 @@ int main()
 
         // Displaying the window.
         window.display();
-
-        // End of interval
-        auto timePoint2(chrono::high_resolution_clock::now());
-        
-        // Calculate the elapsed time in milliseconds
-        // substract two std::chrono::time_point objects
-        // return a std::chrono::duration object, wich
-        // represent a period.
-        auto elapsedTime(timePoint2 - timePoint1);
-        
-        // Convert a duration to float using
-        // the safe cast function chrono::duration_cast
-        FrameTime ft{chrono::duration_cast<chrono::duration<float, milli>>(elapsedTime).count()};
-
-        lastFrametime = ft;
-        // We can approximate the fps by dividing 1.f by the elapsed seconds
-        // calculated by convert ft to seconds.
-        auto ftSeconds(ft/1000.f);
-        auto fps(1.f/ftSeconds);
-
-        window.setTitle("FT: " + to_string(ft) + "\t FPS: " + to_string(fps));
     }
+};
 
+int main()
+{
+    Game{}.run();
     return 0;
 }
