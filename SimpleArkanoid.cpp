@@ -1,8 +1,13 @@
 #include <math.h>
+#include <iostream>
 #include <chrono>
 #include <vector>
 #include <memory>
 #include <algorithm>
+#include <bitset>
+#include <array>
+#include <cassert>
+#include <type_traits>
 
 #include <SFML/Window.hpp>
 #include <SFML/Graphics.hpp>
@@ -25,13 +30,45 @@ constexpr float ftStep{1.f}, ftSlice{1.f};
 
 namespace CompositionArkanoid
 {
+
+struct Component;
 class Entity;
+
+using ComponentID = std::size_t;
+
+namespace Internal
+{
+inline ComponentID getUniqueComponentID() noexcept
+{
+    static ComponentID lastID{0u};
+    return lastID++;
+}
+} // namespace Internal
+
+template <typename T>
+inline ComponentID getComponentTypeID() noexcept
+{
+    // Make sure this function is only called with types that inherit from `Component`.
+    static_assert(std::is_base_of<Component, T>::value, "T must inherit from Component");
+    static ComponentID typeID{Internal::getUniqueComponentID()};
+    return typeID;
+}
+
+// Max number of componets
+constexpr std::size_t maxComponents{32};
+
+// Define a bitset for out components
+using ComponentBitset = std::bitset<maxComponents>;
+
+// And also define an array for them.
+using ComponentArray = std::array<Component *, maxComponents>;
 
 struct Component
 {
     // Pointer to parent entity
-    Entity *entity{nullptr};
+    Entity *entity;
 
+    virtual void init() {}
     virtual void update(float mFT) {}
     virtual void draw() {}
 
@@ -47,6 +84,11 @@ class Entity
     // Here we store components to allow polymorphism
     std::vector<std::unique_ptr<Component>> components;
 
+    // Arrays to get a component with specific ID and known the existing of a
+    // component with specific ID.
+    ComponentArray componentArray;
+    ComponentBitset componentBitset;
+
   public:
     void update(float mFT)
     {
@@ -60,20 +102,38 @@ class Entity
     }
 
     bool isAlive() const { return alive; }
-    bool destroy() { alive = false; }
+    void destroy() { alive = false; }
+
+    // To check if an entity has a component.
+    template <typename T>
+    bool hasComponent() const
+    {
+        return componentBitset[getComponentTypeID<T>()];
+    }
 
     template <typename T, typename... TArgs>
     T &addComponent(TArgs &&... mArgs)
     {
-        T *c(new T(std::foward<TArgs>(mArgs)...));
+        assert(!hasComponent<T>());
 
+        T *c(new T(std::forward<TArgs>(mArgs)...));
         c->entity = this;
-
         std::unique_ptr<Component> uPtr{c};
-
         components.emplace_back(std::move(uPtr));
 
+        componentArray[getComponentTypeID<T>()] = c;
+        componentBitset[getComponentTypeID<T>()] = true;
+
+        c->init();
+
         return *c;
+    }
+
+    template<typename T> T& getComponent() const
+    {
+        assert(hasComponent<T>());
+        auto ptr(componentArray[getComponentTypeID<T>()]);
+        return *static_cast<T*>(ptr);
     }
 };
 
