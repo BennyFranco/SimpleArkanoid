@@ -1,5 +1,8 @@
 #include <math.h>
 #include <chrono>
+#include <vector>
+#include <memory>
+#include <algorithm>
 
 #include <SFML/Window.hpp>
 #include <SFML/Graphics.hpp>
@@ -19,6 +22,95 @@ constexpr int countBlockX{11}, countBlockY{4};
 
 // Frametime calculations
 constexpr float ftStep{1.f}, ftSlice{1.f};
+
+namespace CompositionArkanoid
+{
+class Entity;
+
+struct Component
+{
+    // Pointer to parent entity
+    Entity *entity{nullptr};
+
+    virtual void update(float mFT) {}
+    virtual void draw() {}
+
+    virtual ~Component() {}
+};
+
+class Entity
+{
+  private:
+    // Used to know if the entity is aliver or not
+    bool alive{true};
+
+    // Here we store components to allow polymorphism
+    std::vector<std::unique_ptr<Component>> components;
+
+  public:
+    void update(float mFT)
+    {
+        for (auto &component : components)
+            component->update(mFT);
+    }
+    void draw()
+    {
+        for (auto &component : components)
+            component->draw();
+    }
+
+    bool isAlive() const { return alive; }
+    bool destroy() { alive = false; }
+
+    template <typename T, typename... TArgs>
+    T &addComponent(TArgs &&... mArgs)
+    {
+        T *c(new T(std::foward<TArgs>(mArgs)...));
+
+        c->entity = this;
+
+        std::unique_ptr<Component> uPtr{c};
+
+        components.emplace_back(std::move(uPtr));
+
+        return *c;
+    }
+};
+
+struct Manager
+{
+  private:
+    std::vector<std::unique_ptr<Entity>> entities;
+
+  public:
+    void update(float mFT)
+    {
+        // Clean up dead entities
+        entities.erase(remove_if(begin(entities), end(entities),
+                                 [](const std::unique_ptr<Entity> &mEntity) {
+                                     return !mEntity->isAlive();
+                                 }),
+                       end(entities));
+
+        for (auto &entity : entities)
+            entity->update(mFT);
+    }
+
+    void draw()
+    {
+        for (auto &entity : entities)
+            entity->draw();
+    }
+
+    Entity &addEntity()
+    {
+        Entity *e{new Entity{}};
+        std::unique_ptr<Entity> uPtr{e};
+        entities.emplace_back(std::move(uPtr));
+        return *e;
+    }
+};
+}; // namespace CompositionArkanoid
 
 struct Ball
 {
@@ -208,7 +300,7 @@ struct Game
         {
             // Start of time interval
             auto timePoint1(chrono::high_resolution_clock::now());
-            
+
             inputPhase();
             updatePhase();
             drawPhase();
@@ -251,11 +343,10 @@ struct Game
             }
         }
 
-        if(sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Escape))
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::Key::Escape))
         {
             running = false;
         }
-        
     }
 
     void updatePhase()
