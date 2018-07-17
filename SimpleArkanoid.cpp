@@ -8,6 +8,7 @@
 #include <array>
 #include <cassert>
 #include <type_traits>
+#include <functional>
 
 #include <SFML/Window.hpp>
 #include <SFML/Graphics.hpp>
@@ -30,11 +31,13 @@ constexpr float ftStep{1.f}, ftSlice{1.f};
 
 namespace CompositionArkanoid
 {
-
 struct Component;
 class Entity;
+struct Manager;
+struct Game;
 
 using ComponentID = std::size_t;
+using Group = std::size_t;
 
 namespace Internal
 {
@@ -63,6 +66,9 @@ using ComponentBitset = std::bitset<maxComponents>;
 // And also define an array for them.
 using ComponentArray = std::array<Component *, maxComponents>;
 
+constexpr std::size_t maxGroups{32};
+using GroupBitset = std::bitset<maxGroups>;
+
 struct Component
 {
     // Pointer to parent entity
@@ -78,6 +84,7 @@ struct Component
 class Entity
 {
   private:
+    Manager &manager;
     // Used to know if the entity is aliver or not
     bool alive{true};
 
@@ -89,7 +96,11 @@ class Entity
     ComponentArray componentArray;
     ComponentBitset componentBitset;
 
+    GroupBitset groupBitset;
+
   public:
+    Entity(Manager &mManager) : manager(mManager) {}
+
     void update(float mFT)
     {
         for (auto &component : components)
@@ -111,6 +122,17 @@ class Entity
         return componentBitset[getComponentTypeID<T>()];
     }
 
+    bool hasGroup(Group mGroup) const noexcept
+    {
+        return groupBitset[mGroup];
+    }
+
+    void addGroup(Group mGroup) noexcept;
+    void delGroup(Group mGroup) noexcept
+    {
+        groupBitset[mGroup] = false;
+    }
+
     template <typename T, typename... TArgs>
     T &addComponent(TArgs &&... mArgs)
     {
@@ -129,11 +151,12 @@ class Entity
         return *c;
     }
 
-    template<typename T> T& getComponent() const
+    template <typename T>
+    T &getComponent() const
     {
         assert(hasComponent<T>());
         auto ptr(componentArray[getComponentTypeID<T>()]);
-        return *static_cast<T*>(ptr);
+        return *static_cast<T *>(ptr);
     }
 };
 
@@ -141,6 +164,7 @@ struct Manager
 {
   private:
     std::vector<std::unique_ptr<Entity>> entities;
+    std::array<std::vector<Entity *>, maxGroups> groupedEntities;
 
   public:
     void update(float mFT)
@@ -162,114 +186,179 @@ struct Manager
             entity->draw();
     }
 
+    void addToGroup(Entity *mEntity, Group mGroup)
+    {
+        groupedEntities[mGroup].emplace_back(mEntity);
+    }
+
+    std::vector<Entity *> &getEntitiesByGroup(Group mGroup)
+    {
+        return groupedEntities[mGroup];
+    }
+
+    void refresh()
+    {
+        for (auto i(0u); i < maxGroups; i++)
+        {
+            auto &v(groupedEntities[i]);
+
+            v.erase(
+                std::remove_if(std::begin(v), std::end(v),
+                               [i](Entity *mEntity) {
+                                   return !mEntity->isAlive() || !mEntity->hasGroup(i);
+                               }),
+                std::end(v));
+        }
+
+        entities.erase(
+            std::remove_if(std::begin(entities), std::end(entities),
+                           [](const std::unique_ptr<Entity> &mEntity) {
+                               return !mEntity->isAlive();
+                           }),
+            std::end(entities));
+    }
+
     Entity &addEntity()
     {
-        Entity *e{new Entity{}};
+        Entity *e{new Entity{*this}};
         std::unique_ptr<Entity> uPtr{e};
         entities.emplace_back(std::move(uPtr));
         return *e;
     }
 };
-}; // namespace CompositionArkanoid
 
-struct Ball
+void Entity::addGroup(Group mGroup) noexcept
 {
-    // SFML class that defines a circle shape
-    CircleShape shape;
+    groupBitset[mGroup] = true;
+    manager.addToGroup(this, mGroup);
+}
 
-    // Velocity of the ball is a vector2d value in negative to move the ball at top and left of the screen in the first quadrant.
-    Vector2f velocity{-ballVelocity, -ballVelocity};
-    // Ball constructor
-    // mX is the x coordinate
-    // mY is the y coordinate
-    Ball(float mX, float mY)
+// Position of the entities in the world
+struct CPosition : Component
+{
+    Vector2f position;
+
+    CPosition() = default;
+    CPosition(const Vector2f &mPosition) : position(mPosition) {}
+
+    float x() const noexcept { return position.x; }
+    float y() const noexcept { return position.y; }
+};
+
+struct CPhysics : Component
+{
+    CPosition *cPosition{nullptr};
+    Vector2f velocity, halfSize;
+
+    std::function<void(const Vector2f &)> onOutOfBounds;
+    CPhysics(const Vector2f &mHalfSize) : halfSize{mHalfSize} {}
+
+    void init() override
     {
-        shape.setPosition(mX, mY);
-        shape.setRadius(ballRadius);
-        shape.setFillColor(Color::Red);
-        shape.setOrigin(ballRadius, ballRadius);
+        cPosition = &entity->getComponent<CPosition>();
     }
 
-    // Updates the Ball position by velocity.
-    void Update(FrameTime pFrameTime)
+    void update(float mFT) override
     {
-        shape.move(velocity * pFrameTime);
+        cPosition->position += velocity * mFT;
 
-        // Control de limits of the ball in the screen
+        if (onOutOfBounds == nullptr)
+            return;
+
         if (left() < 0)
-            velocity.x = ballVelocity;
-
+            onOutOfBounds(Vector2f{1.f, 0.f});
         else if (right() > windowWidth)
-            velocity.x = -ballVelocity;
+            onOutOfBounds(Vector2f{-1.f, 0.f});
 
         if (top() < 0)
-            velocity.y = ballVelocity;
+            onOutOfBounds(Vector2f{0.f, 1.0f});
         else if (bottom() > windowHeight)
-            velocity.y = -ballVelocity;
+            onOutOfBounds(Vector2f{0.f, -1.f});
     }
 
-    float x() const noexcept { return shape.getPosition().x; }
-    float y() const noexcept { return shape.getPosition().y; }
-    float left() const noexcept { return x() - shape.getRadius(); }
-    float right() const noexcept { return x() + shape.getRadius(); }
-    float top() const noexcept { return y() - shape.getRadius(); }
-    float bottom() const noexcept { return y() + shape.getRadius(); }
+    float x() const noexcept { return cPosition->x(); }
+    float y() const noexcept { return cPosition->y(); }
+    float left() const noexcept { return x() - halfSize.x; }
+    float right() const noexcept { return x() + halfSize.x; }
+    float top() const noexcept { return y() - halfSize.y; }
+    float bottom() const noexcept { return y() + halfSize.y; }
 };
 
-struct Rectangle
+struct CCircle : Component
 {
-    RectangleShape shape;
+    Game *game{nullptr};
+    CPosition *cPosition{nullptr};
+    CircleShape shape;
+    float radius;
 
-    float x() const noexcept { return shape.getPosition().x; }
-    float y() const noexcept { return shape.getPosition().y; }
-    float left() const noexcept { return x() - shape.getSize().x / 2.f; }
-    float right() const noexcept { return x() + shape.getSize().x / 2.f; }
-    float top() const noexcept { return y() - shape.getSize().y / 2.f; }
-    float bottom() const noexcept { return y() + shape.getSize().y / 2.f; }
-};
+    CCircle(Game *mGame, float mRadius) : game{mGame}, radius{mRadius} {}
 
-struct Paddle : public Rectangle
-{
-    Vector2f velocity;
-
-    Paddle(float mX, float mY)
+    void init() override
     {
-        shape.setPosition(mX, mY);
-        shape.setSize({paddleWidth, paddleHeight});
+        cPosition = &entity->getComponent<CPosition>();
+
+        shape.setRadius(radius);
         shape.setFillColor(Color::Red);
-        shape.setOrigin(paddleWidth / 2.f, paddleHeight / 2.f);
+        shape.setOrigin(radius, radius);
     }
 
-    void Update(FrameTime pFrameTime)
+    void update(float mFT) override
     {
-        shape.move(velocity * pFrameTime);
+        shape.setPosition(cPosition->position);
+    }
 
-        if (Keyboard::isKeyPressed(Keyboard::Key::Left) && left() > 0)
+    void draw() override;
+};
+
+struct CRectangle : Component
+{
+    Game *game{nullptr};
+    CPosition *cPosition{nullptr};
+    RectangleShape shape;
+    Vector2f size;
+
+    CRectangle(Game *mGame, const Vector2f &mHalfSize) : game{mGame}, size{mHalfSize * 2.f} {}
+
+    void init() override
+    {
+        cPosition = &entity->getComponent<CPosition>();
+
+        shape.setSize(size);
+        shape.setFillColor(Color::Red);
+        shape.setOrigin(size.x / 2.f, size.y / 2.f);
+    }
+
+    void update(float mFT) override
+    {
+        shape.setPosition(cPosition->position);
+    }
+
+    void draw() override;
+};
+
+struct CPaddleControl : Component
+{
+    CPhysics *cPhysics{nullptr};
+
+    void init() override
+    {
+        cPhysics = &entity->getComponent<CPhysics>();
+    }
+
+    void update(float mFT) override
+    {
+        if (Keyboard::isKeyPressed(Keyboard::Key::Left) && cPhysics->left() > 0)
         {
-            velocity.x = -paddleVelocity;
+            cPhysics->velocity.x = -paddleVelocity;
         }
-        else if (Keyboard::isKeyPressed(Keyboard::Key::Right) && right() < windowWidth)
+        else if (Keyboard::isKeyPressed(Keyboard::Key::Right) && cPhysics->right() < windowWidth)
         {
-            velocity.x = paddleVelocity;
+            cPhysics->velocity.x = paddleVelocity;
         }
         else
         {
-            velocity.x = 0;
+            cPhysics->velocity.x = 0;
         }
-    }
-};
-
-struct Brick : public Rectangle
-{
-    // With this check if is destroyed or not.
-    bool destroyed{false};
-
-    Brick(float mX, float mY)
-    {
-        shape.setPosition(mX, mY);
-        shape.setSize({blockWidth, blockHeight});
-        shape.setFillColor(Color::Green);
-        shape.setOrigin(blockWidth / 2.f, blockHeight / 2.f);
     }
 };
 
@@ -281,37 +370,43 @@ bool isIntersecting(T1 &mA, T2 &mB)
 }
 
 // Testing the paddle and ball collision
-void testCollision(Paddle &mPaddle, Ball &mBall)
+void testCollisionPB(Entity &mPaddle, Entity &mBall)
 {
+    auto &cpPaddle(mPaddle.getComponent<CPhysics>());
+    auto &cpBall(mBall.getComponent<CPhysics>());
+
     // If not collision, return.
-    if (!isIntersecting(mPaddle, mBall))
+    if (!isIntersecting(cpPaddle, cpBall))
         return;
 
     // Otherwise change velocity (push ball to upwards).
-    mBall.velocity.y = -ballVelocity;
+    cpBall.velocity.y = -ballVelocity;
 
     // and dependes of the paddle position.
-    if (mBall.x() < mPaddle.x())
-        mBall.velocity.x = -ballVelocity;
+    if (cpBall.x() < cpPaddle.x())
+        cpBall.velocity.x = -ballVelocity;
     else
-        mBall.velocity.x = ballVelocity;
+        cpBall.velocity.x = ballVelocity;
 }
 
 // Overriding testCollision method for bricks and ball
-void testCollision(Brick &mBrick, Ball &mBall)
+void testCollisionBB(Entity &mBrick, Entity &mBall)
 {
+    auto &cpBrick(mBrick.getComponent<CPhysics>());
+    auto &cpBall(mBall.getComponent<CPhysics>());
+
     // If not collision, return.
-    if (!isIntersecting(mBrick, mBall))
+    if (!isIntersecting(cpBrick, cpBall))
         return;
 
     // Otherwise destroy the brick!
-    mBrick.destroyed = true;
+    mBrick.destroy();
 
     // Calculate intersections
-    float overlapLeft{mBall.right() - mBrick.left()};
-    float overlapRight{mBrick.right() - mBall.left()};
-    float overlapTop{mBall.bottom() - mBrick.top()};
-    float overlapBottom{mBrick.bottom() - mBall.top()};
+    float overlapLeft{cpBall.right() - cpBrick.left()};
+    float overlapRight{cpBrick.right() - cpBall.left()};
+    float overlapTop{cpBall.bottom() - cpBrick.top()};
+    float overlapBottom{cpBrick.bottom() - cpBall.top()};
 
     bool ballFromLeft(abs(overlapLeft) < abs(overlapRight));
     bool ballFromTop(abs(overlapTop) < abs(overlapBottom));
@@ -320,13 +415,20 @@ void testCollision(Brick &mBrick, Ball &mBall)
     float minOverlapY{ballFromTop ? overlapTop : overlapBottom};
 
     if (abs(minOverlapX) < abs(minOverlapY))
-        mBall.velocity.x = ballFromLeft ? -ballVelocity : ballVelocity;
+        cpBall.velocity.x = ballFromLeft ? -ballVelocity : ballVelocity;
     else
-        mBall.velocity.y = ballFromTop ? -ballFromTop : ballVelocity;
+        cpBall.velocity.y = ballFromTop ? -ballFromTop : ballVelocity;
 }
 
 struct Game
 {
+    enum ArkanoidGroup : std::size_t
+    {
+        GPaddle,
+        GBrick,
+        GBall
+    };
+
     RenderWindow window{{windowWidth, windowHeight}, "Simple Arkanoid"};
     // Accumulate the current frametime slice.
     // If the game run fast, it will take some frames before
@@ -335,19 +437,73 @@ struct Game
     // currentSlice >= ftSlice * n, where n >= 1.
     FrameTime lastFrametime{0.f}, currentSlice{0.f};
     bool running{false};
+    Manager manager;
 
-    Ball ball{windowWidth / 2, windowHeight / 2};
-    Paddle paddle{windowWidth / 2, windowHeight - 50};
-    vector<Brick> bricks;
+    Entity &createBall()
+    {
+        auto &entity(manager.addEntity());
+        entity.addComponent<CPosition>(Vector2f{windowWidth / 2, windowHeight / 2});
+        entity.addComponent<CPhysics>(Vector2f{ballRadius, ballRadius});
+        entity.addComponent<CCircle>(this, ballRadius);
+
+        auto &cPhysics(entity.getComponent<CPhysics>());
+        cPhysics.velocity = Vector2f{-ballVelocity, -ballVelocity};
+        cPhysics.onOutOfBounds = [&cPhysics](const Vector2f &mSide) {
+            if (mSide.x != 0.f)
+            {
+                cPhysics.velocity.x = std::abs(cPhysics.velocity.x) * mSide.x;
+            }
+
+            if (mSide.y != 0.f)
+            {
+                cPhysics.velocity.y = std::abs(cPhysics.velocity.y) * mSide.y;
+            }
+        };
+
+        entity.addGroup(ArkanoidGroup::GBall);
+
+        return entity;
+    }
+
+    Entity &createBrick(const Vector2f &mPosition)
+    {
+        Vector2f halfSize{blockWidth / 2.f, blockHeight / 2.f};
+        auto &entity(manager.addEntity());
+
+        entity.addComponent<CPosition>(mPosition);
+        entity.addComponent<CPhysics>(halfSize);
+        entity.addComponent<CRectangle>(this, halfSize);
+
+        entity.addGroup(ArkanoidGroup::GBrick);
+
+        return entity;
+    }
+
+    Entity &createPaddle()
+    {
+        Vector2f halfSize{paddleWidth / 2.f, paddleHeight / 2.f};
+        auto &entity(manager.addEntity());
+
+        entity.addComponent<CPosition>(Vector2f{windowWidth / 2, windowHeight - 60.f});
+        entity.addComponent<CPhysics>(halfSize);
+        entity.addComponent<CRectangle>(this, halfSize);
+        entity.addComponent<CPaddleControl>();
+
+        entity.addGroup(ArkanoidGroup::GPaddle);
+
+        return entity;
+    }
 
     Game()
     {
         window.setFramerateLimit(60);
+        createPaddle();
+        createBall();
         for (int iX{0}; iX < countBlockX; ++iX)
         {
             for (int iY{0}; iY < countBlockY; ++iY)
             {
-                bricks.emplace_back((iX + 1) * (blockWidth + 3) + 22, (iY + 2) * (blockHeight + 3));
+                createBrick(Vector2f{(iX + 1) * (blockWidth + 3) + 22, (iY + 2) * (blockHeight + 3)});
             }
         }
     }
@@ -420,19 +576,24 @@ struct Game
         // game logic three times.
         for (; currentSlice >= ftSlice; currentSlice -= ftSlice)
         {
-            // Update the ball position every loop.
+            /* // Update the ball position every loop.
             ball.Update(ftStep);
             // Update the paddle.
-            paddle.Update(ftStep);
+            paddle.Update(ftStep);*/
+            manager.refresh();
+            manager.update(ftStep);
 
-            testCollision(paddle, ball);
+            auto &paddles(manager.getEntitiesByGroup(GPaddle));
+            auto &bricks(manager.getEntitiesByGroup(GBrick));
+            auto &balls(manager.getEntitiesByGroup(GBall));
 
-            for (auto &brick : bricks)
-                testCollision(brick, ball);
-
-            bricks.erase(remove_if(begin(bricks), end(bricks),
-                                   [](const Brick &mBrick) { return mBrick.destroyed; }),
-                         end(bricks));
+            for (auto &b : balls)
+            {
+                for (auto &p : paddles)
+                    testCollisionPB(*p, *b);
+                for (auto &br : bricks)
+                    testCollisionBB(*br, *b);
+            }
         }
     }
 
@@ -441,21 +602,31 @@ struct Game
         // Clear window, for some reason I need to do this after events in MacOS.
         window.clear(Color::Black);
 
-        // Drawing All.
-        window.draw(ball.shape);
-        window.draw(paddle.shape);
-
-        // Draw Bricks
-        for (auto &brick : bricks)
-            window.draw(brick.shape);
+        manager.draw();
 
         // Displaying the window.
         window.display();
     }
+
+    void render(const Drawable &mDrawable)
+    {
+        window.draw(mDrawable);
+    }
 };
+
+void CCircle::draw()
+{
+    game->render(shape);
+}
+
+void CRectangle::draw()
+{
+    game->render(shape);
+}
+} // namespace CompositionArkanoid
 
 int main()
 {
-    Game{}.run();
+    CompositionArkanoid::Game{}.run();
     return 0;
 }

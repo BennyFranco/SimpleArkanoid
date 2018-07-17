@@ -26,7 +26,16 @@
 			"__bit_reference": "cpp",
 			"initializer_list": "cpp",
 			"iterator": "cpp",
-			"string_view": "cpp"
+			"string_view": "cpp",
+			"__config": "cpp",
+			"__nullptr": "cpp",
+			"cstddef": "cpp",
+			"exception": "cpp",
+			"stdexcept": "cpp",
+			"type_traits": "cpp",
+			"typeinfo": "cpp",
+			"algorithm": "cpp",
+			"utility": "cpp"
 		}
 	}
 }
